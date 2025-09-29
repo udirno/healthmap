@@ -1,48 +1,44 @@
 # 🎵 Music Explorer Map
 
-**Interactive Audio Feature Visualization** - Discover musical relationships through UMAP dimensionality reduction and machine learning.
-
-## 🌟 Features
-
-- **Interactive Visualization**: Explore 800 tracks across 5 genres in 2D space
-- **Smart Recommendations**: K-nearest neighbors algorithm for similar track discovery
-- **Spatial Clustering**: Auto-generated playlists based on acoustic similarity
-- **Real-time Filtering**: Filter by genre, energy, danceability, valence, and acousticness
-- **Apple Music Aesthetic**: Modern, clean interface with gradient accents
-- **Authentic Metadata**: Realistic track and artist names (no more "Track 001")
+**Interactive Audio Feature Visualization** - Discover musical relationships through machine learning and 2D projection.
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- Python 3.8+
-- pip package manager
+```bash
+git clone <your-repo-url>
+cd music-explorer
+pip install -r requirements.txt
+streamlit run simplified_app.py
+```
 
-### Installation
+**Open**: http://localhost:8501
 
-1. **Clone/Extract the project**
-   ```bash
-   # If you have the zip file, extract it
-   unzip music-explorer.zip
-   cd music-explorer
-   ```
+## 🌟 What This Does
 
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+- **Interactive Map**: Visualize music similarity in 2D space
+- **Smart Recommendations**: Find similar tracks based on audio features  
+- **Real Data**: Generate datasets using iTunes Search API (no auth needed)
+- **Educational**: Learn about ML, dimensionality reduction, and music analysis
+- **Apple-Inspired UI**: Clean, modern interface with hover effects
 
-3. **Run the application**
-   ```bash
-   # Basic version
-   streamlit run streamlit_app.py
-   
-   # Enhanced version (recommended)
-   streamlit run enhanced_streamlit_app.py
-   ```
+## 📚 Documentation
 
-4. **Open your browser**
-   - The app will automatically open at `http://localhost:8501`
-   - If not, manually navigate to the URL shown in the terminal
+- **[Project Context](docs/CONTEXT.md)** - Current state, known issues, technical decisions
+- **[Development Roadmap](docs/ROADMAP.md)** - Next features and priorities  
+- **[Data Guide](docs/DATA_GUIDE.md)** - How to get and format music data
+- **[Test Plan](docs/TEST_PLAN.md)** - Manual testing checklist
+
+## ⚠️ Known Issues
+
+1. **Critical Bug**: Recommendations may crash with numpy error (fix in progress)
+2. **UX**: Manual tab switch required after uploading data
+3. **Visual**: New genres need distinct colors
+
+## 🎛️ How to Use
+
+1. **Explore Tab**: Adjust sliders to filter tracks, select points for recommendations
+2. **Data Guide Tab**: Generate real music data or upload your own CSV
+3. **Tech README Tab**: Learn about the ML concepts and architecture
 
 ## 📊 Dataset
 

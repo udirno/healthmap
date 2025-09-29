@@ -1,0 +1,15 @@
+# Large data files
+data/*.csv
+!data/sample_*.csv
+
+# Cache and temporary files
+.cache/
+*.cache
+__pycache__/
+
+# Large notebooks
+notebooks/*.ipynb
+
+# Virtual environments
+.venv/
+venv/
