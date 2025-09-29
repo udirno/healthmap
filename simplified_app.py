@@ -5,6 +5,9 @@ import plotly.graph_objects as go
 import numpy as np
 import plotly.express as px
 import streamlit.components.v1 as components
+from urllib.parse import urlencode
+
+from utils import get_color_map, validate_schema, compute_distance_series
 
 # Enhanced page configuration
 st.set_page_config(
@@ -132,19 +135,8 @@ def create_visualization(df, selected_genres, feature_filters):
         ]
     
     # Dynamic color mapping per present genres for readability
-    def _get_color_map(genres):
-        palette = (
-            px.colors.qualitative.Set3
-            + px.colors.qualitative.Set2
-            + px.colors.qualitative.Pastel
-            + px.colors.qualitative.Bold
-        )
-        mapping = {}
-        for i, g in enumerate(genres):
-            mapping[g] = palette[i % len(palette)]
-        return mapping
     present_genres = list(filtered_df['genre'].dropna().unique())
-    color_map = _get_color_map(present_genres)
+    color_map = get_color_map(present_genres)
     
     # Create plot
     fig = go.Figure()
@@ -212,22 +204,7 @@ def simple_recommendations(df, selected_track_name, n_recommendations=5):
     selected_track = selected_track.iloc[0]
 
     # Calculate distances in 2D space robustly (avoid pandas ufunc/Series pitfalls)
-    try:
-        coords = df[['x', 'y']].astype(float).to_numpy()
-        selected_xy = selected_track[['x', 'y']].astype(float).to_numpy()
-        distances_arr = np.linalg.norm(coords - selected_xy, axis=1)
-    except Exception:
-        # Fallback: coerce with NaNs handled
-        coords = df[['x', 'y']].apply(pd.to_numeric, errors='coerce').fillna(0.0).to_numpy()
-        selected_xy = selected_track[['x', 'y']].apply(pd.to_numeric, errors='coerce').fillna(0.0).to_numpy()
-        distances_arr = np.linalg.norm(coords - selected_xy, axis=1)
-
-    # Convert to Series aligned to df index for convenient selection/sorting
-    distances = pd.Series(distances_arr, index=df.index)
-
-    # Exclude the selected track itself if present
-    if selected_track.name in distances.index:
-        distances.loc[selected_track.name] = np.inf
+    distances = compute_distance_series(df, selected_track)
 
     # Get closest tracks
     similar_indices = distances.nsmallest(n_recommendations).index
@@ -338,12 +315,73 @@ def main():
         with st.sidebar:
             st.header("🎛️ Controls")
             st.caption("Use the sliders to filter the musical space. Hover points to inspect tracks.")
+
+            # Guided Presets
+            st.markdown("### 🎯 Guided Presets")
+            presets = {
+                'Chill': {
+                    'energy': (0.0, 0.55),
+                    'danceability': (0.30, 0.80),
+                    'valence': (0.20, 0.75)
+                },
+                'High-energy': {
+                    'energy': (0.60, 1.0),
+                    'danceability': (0.50, 1.0),
+                    'valence': (0.40, 0.95)
+                },
+                'Happy': {
+                    'valence': (0.60, 1.0)
+                },
+                'Moody': {
+                    'valence': (0.0, 0.50),
+                    'energy': (0.0, 0.70)
+                }
+            }
+            preset_cols = st.columns(2)
+            preset_clicked = None
+            with preset_cols[0]:
+                if st.button('Chill'):
+                    preset_clicked = 'Chill'
+                if st.button('Happy'):
+                    preset_clicked = preset_clicked or 'Happy'
+            with preset_cols[1]:
+                if st.button('High-energy'):
+                    preset_clicked = 'High-energy'
+                if st.button('Moody'):
+                    preset_clicked = preset_clicked or 'Moody'
+            if preset_clicked:
+                st.session_state['active_preset'] = preset_clicked
+            active_preset = st.session_state.get('active_preset')
+            if active_preset:
+                st.caption(f"Active preset: {active_preset}")
             
-            # Genre selection
+            # Load initial state from query params if present
+            qparams = st.experimental_get_query_params()
+            qp_genres = qparams.get('genres')
+            qp_genres_list = None
+            if qp_genres:
+                try:
+                    qp_genres_list = qp_genres[0].split(',') if isinstance(qp_genres, list) else qp_genres.split(',')
+                except Exception:
+                    qp_genres_list = None
+            def _parse_range(qv):
+                try:
+                    if isinstance(qv, list):
+                        qv = qv[0]
+                    parts = [float(x) for x in str(qv).split('-')]
+                    if len(parts) == 2 and 0.0 <= parts[0] <= 1.0 and 0.0 <= parts[1] <= 1.0:
+                        return (min(parts[0], parts[1]), max(parts[0], parts[1]))
+                except Exception:
+                    return None
+                return None
+            qp_energy_range = _parse_range(qparams.get('energy'))
+            qp_dance_range = _parse_range(qparams.get('danceability'))
+            qp_valence_range = _parse_range(qparams.get('valence'))
+
             selected_genres = st.multiselect(
                 "🎭 Select Genres",
                 options=sorted(df['genre'].unique()),
-                default=sorted(df['genre'].unique()),
+                default=qp_genres_list or sorted(df['genre'].unique()),
                 help="Choose which genres to display on the map"
             )
             
@@ -353,22 +391,56 @@ def main():
             st.markdown("### 🎚️ Audio Features")
             feature_filters = {}
             
+            default_energy = qp_energy_range or (0.0, 1.0)
+            default_dance = qp_dance_range or (0.0, 1.0)
+            default_valence = qp_valence_range or (0.0, 1.0)
+            if active_preset and not (qp_energy_range or qp_dance_range or qp_valence_range):
+                default_energy = presets.get(active_preset, {}).get('energy', default_energy)
+                default_dance = presets.get(active_preset, {}).get('danceability', default_dance)
+                default_valence = presets.get(active_preset, {}).get('valence', default_valence)
+
             feature_filters['energy'] = st.slider(
-                "⚡ Energy", 0.0, 1.0, (0.0, 1.0), 0.05,
+                "⚡ Energy", 0.0, 1.0, default_energy, 0.05,
                 help="Perceived intensity and activity; higher = louder, faster, more aggressive"
             )
             
             feature_filters['danceability'] = st.slider(
-                "💃 Danceability", 0.0, 1.0, (0.0, 1.0), 0.05,
+                "💃 Danceability", 0.0, 1.0, default_dance, 0.05,
                 help="How suitable a track is for dancing based on tempo, rhythm stability, beat strength"
             )
             
             feature_filters['valence'] = st.slider(
-                "😊 Valence", 0.0, 1.0, (0.0, 1.0), 0.05,
+                "😊 Valence", 0.0, 1.0, default_valence, 0.05,
                 help="Musical positivity; higher = happier/bright, lower = sadder/darker"
             )
             
             st.markdown("---")
+            # Shareable link (encodes genres and sliders) with clipboard copy
+            if st.button("🔗 Copy shareable link"):
+                params = {
+                    'genres': ','.join(selected_genres),
+                    'energy': f"{feature_filters['energy'][0]}-{feature_filters['energy'][1]}",
+                    'danceability': f"{feature_filters['danceability'][0]}-{feature_filters['danceability'][1]}",
+                    'valence': f"{feature_filters['valence'][0]}-{feature_filters['valence'][1]}",
+                }
+                qs = urlencode(params)
+                components.html(
+                    f"""
+                    <script>
+                    (function(){{
+                      const url = window.location.origin + window.location.pathname + '?{qs}';
+                      navigator.clipboard.writeText(url).then(function(){{
+                        const streamlitDoc = window.parent.document;
+                        const toast = streamlitDoc.querySelector('[data-testid="stNotification"]');
+                      }});
+                    }})();
+                    </script>
+                    """,
+                    height=0,
+                    width=0
+                )
+                st.code(qs, language=None)
+                st.toast("Share link copied to clipboard. The query string is shown below as well.")
             
             # Track selection for recommendations (based on filtered data)
             st.markdown("### 🎯 Track Selection")
@@ -456,10 +528,16 @@ def main():
             display_genre_distribution(filtered_df, color_map=color_map)
         with cB:
             if not filtered_df.empty:
+                # Radar (polar) chart of mean features
                 means = filtered_df[['danceability','energy','valence','acousticness','instrumentalness','liveness','speechiness']].mean()
-                fig_f = go.Figure(data=[go.Bar(x=means.index, y=means.values, marker_color="#667eea")])
-                fig_f.update_layout(height=320, margin=dict(t=40,b=40,l=20,r=20), title_text="Feature Means (filtered)")
-                st.plotly_chart(fig_f, use_container_width=True)
+                categories = means.index.tolist()
+                values = means.values.tolist()
+                values.append(values[0])
+                categories.append(categories[0])
+                fig_radar = go.Figure()
+                fig_radar.add_trace(go.Scatterpolar(r=values, theta=categories, fill='toself', name='Means', line_color="#667eea"))
+                fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0,1])), showlegend=False, height=320, margin=dict(t=40,b=40,l=20,r=20), title_text="Feature Means (filtered) - Radar")
+                st.plotly_chart(fig_radar, use_container_width=True)
                 st.caption("Average feature intensities for the filtered set (0-1 scale)")
         
         # Recommendations (use filtered_df for neighborhood)
@@ -560,27 +638,21 @@ def main():
         if uploaded is not None:
             try:
                 df_u = pd.read_csv(uploaded)
-                missing = [c for c in required_cols if c not in df_u.columns]
-                if missing:
-                    st.error(f"Missing required columns: {missing}")
+                report = validate_schema(df_u.copy())
+                if not report["ok"]:
+                    if report.get('missing'):
+                        st.error(f"Missing required columns: {report['missing']}")
+                    if report.get('bad_ranges'):
+                        st.warning(f"These feature columns should be in [0,1]: {report['bad_ranges']}")
                 else:
-                    # basic range checks
-                    feature_cols = ['danceability','energy','valence','acousticness','instrumentalness','liveness','speechiness']
-                    bad_ranges = []
-                    for c in feature_cols:
-                        if not ((df_u[c] >= 0).all() and (df_u[c] <= 1).all()):
-                            bad_ranges.append(c)
-                    if bad_ranges:
-                        st.warning(f"These feature columns should be in [0,1]: {bad_ranges}")
-                    else:
-                        st.success("Schema looks good.")
-                        st.dataframe(df_u.head())
-                        if st.button("Use this CSV now (session)"):
-                            st.session_state['session_df'] = df_u
-                            st.session_state['redirect_to_explore'] = True
-                            st.toast("Dataset loaded for this session. Open the Explore tab.")
-                            st.success("Using uploaded dataset for this session. Redirecting to Explore...")
-                            st.experimental_rerun()
+                    st.success("Schema looks good.")
+                    st.dataframe(df_u.head())
+                    if st.button("Use this CSV now (session)"):
+                        st.session_state['session_df'] = df_u
+                        st.session_state['redirect_to_explore'] = True
+                        st.toast("Dataset loaded for this session. Open the Explore tab.")
+                        st.success("Using uploaded dataset for this session. Redirecting to Explore...")
+                        st.experimental_rerun()
             except Exception as e:
                 st.error(f"Failed to read/validate CSV: {e}")
 

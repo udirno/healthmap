@@ -7,6 +7,9 @@
 ```bash
 git clone <your-repo-url>
 cd music-explorer
+python3 -m venv .venv --without-pip
+curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+. .venv/bin/activate && python get-pip.py
 pip install -r requirements.txt
 streamlit run simplified_app.py
 ```
@@ -28,11 +31,13 @@ streamlit run simplified_app.py
 - **[Data Guide](docs/DATA_GUIDE.md)** - How to get and format music data
 - **[Test Plan](docs/TEST_PLAN.md)** - Manual testing checklist
 
-## ⚠️ Known Issues
+## ✅ Recent Improvements
 
-1. **Critical Bug**: Recommendations may crash with numpy error (fix in progress)
-2. **UX**: Manual tab switch required after uploading data
-3. **Visual**: New genres need distinct colors
+- Fixed numpy distance error in recommendations
+- Auto-switch to Explore after adopting a dataset (CSV or iTunes)
+- Distinct, consistent genre colors across views
+- Guided presets and radar chart for better education/UX
+- Shareable links via URL parameters (genres and slider ranges)
 
 ## 🎛️ How to Use
 
@@ -117,7 +122,7 @@ music-explorer/
 Run the test suite to verify everything works:
 
 ```bash
-python test_app.py
+pytest -q
 ```
 
 This will test:
