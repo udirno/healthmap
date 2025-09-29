@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 import plotly.express as px
+import streamlit.components.v1 as components
 
 # Enhanced page configuration
 st.set_page_config(
@@ -195,7 +196,7 @@ def create_visualization(df, selected_genres, feature_filters):
         )
     )
     
-    return fig, filtered_df
+    return fig, filtered_df, color_map
 
 def simple_recommendations(df, selected_track_name, n_recommendations=5):
     """Simple recommendation system using Euclidean distance."""
@@ -210,25 +211,32 @@ def simple_recommendations(df, selected_track_name, n_recommendations=5):
     
     selected_track = selected_track.iloc[0]
 
-    # Calculate distances in 2D space robustly (avoid pandas ufunc issues)
+    # Calculate distances in 2D space robustly (avoid pandas ufunc/Series pitfalls)
     try:
         coords = df[['x', 'y']].astype(float).to_numpy()
         selected_xy = selected_track[['x', 'y']].astype(float).to_numpy()
-        distances = np.linalg.norm(coords - selected_xy, axis=1)
+        distances_arr = np.linalg.norm(coords - selected_xy, axis=1)
     except Exception:
         # Fallback: coerce with NaNs handled
         coords = df[['x', 'y']].apply(pd.to_numeric, errors='coerce').fillna(0.0).to_numpy()
         selected_xy = selected_track[['x', 'y']].apply(pd.to_numeric, errors='coerce').fillna(0.0).to_numpy()
-        distances = np.linalg.norm(coords - selected_xy, axis=1)
-    
-    # Get closest tracks (excluding the selected track)
-    similar_indices = distances.nsmallest(n_recommendations + 1).index[1:]
-    recommendations = df.iloc[similar_indices]
+        distances_arr = np.linalg.norm(coords - selected_xy, axis=1)
+
+    # Convert to Series aligned to df index for convenient selection/sorting
+    distances = pd.Series(distances_arr, index=df.index)
+
+    # Exclude the selected track itself if present
+    if selected_track.name in distances.index:
+        distances.loc[selected_track.name] = np.inf
+
+    # Get closest tracks
+    similar_indices = distances.nsmallest(n_recommendations).index
+    recommendations = df.loc[similar_indices]
     
     st.markdown("### 🎯 Similar Tracks")
     
     for _, track in recommendations.iterrows():
-        similarity = 1 / (1 + distances.iloc[track.name])
+        similarity = 1 / (1 + float(distances.loc[track.name]))
         
         st.markdown(f"""
         <div class="track-card">
@@ -243,13 +251,24 @@ def simple_recommendations(df, selected_track_name, n_recommendations=5):
         </div>
         """, unsafe_allow_html=True)
 
-def display_genre_distribution(filtered_df):
+def display_genre_distribution(filtered_df, color_map=None):
     """Display genre distribution chart."""
     if filtered_df.empty:
         st.warning("No data to display")
         return
     
     genre_counts = filtered_df['genre'].value_counts()
+
+    # Build colors consistent with the scatter plot
+    if color_map is None:
+        palette = (
+            px.colors.qualitative.Set3
+            + px.colors.qualitative.Set2
+            + px.colors.qualitative.Pastel
+            + px.colors.qualitative.Bold
+        )
+        color_map = {g: palette[i % len(palette)] for i, g in enumerate(genre_counts.index)}
+    bar_colors = [color_map.get(g, '#8E8E93') for g in genre_counts.index]
     
     # Create bar chart
     fig = go.Figure(data=[
@@ -257,7 +276,7 @@ def display_genre_distribution(filtered_df):
             x=genre_counts.index,
             y=genre_counts.values,
             marker=dict(
-                color=['#007AFF', '#FF3B30', '#FF9500', '#AF52DE', '#34C759'][:len(genre_counts)],
+                color=bar_colors,
                 opacity=0.8
             ),
             text=genre_counts.values,
@@ -286,6 +305,33 @@ def main():
     
     # Tabs for navigation
     tab_explore, tab_readme, tab_data = st.tabs(["Explore", "Tech README", "Data Guide"])
+
+    # Optional redirect helper: switch to Explore tab after dataset changes
+    def _maybe_redirect_to_explore():
+        if st.session_state.get('redirect_to_explore'):
+            components.html(
+                """
+                <script>
+                (function(){
+                  const doc = window.parent.document;
+                  function clickExplore(){
+                    const tabs = doc.querySelectorAll('[role="tab"], button[role="tab"]');
+                    for (const el of tabs) {
+                      if ((el.innerText || '').trim().startsWith('Explore')) { el.click(); return true; }
+                    }
+                    return false;
+                  }
+                  function tryUntil(){
+                    if (!clickExplore()) { setTimeout(tryUntil, 100); }
+                  }
+                  tryUntil();
+                })();
+                </script>
+                """,
+                height=0,
+                width=0
+            )
+            st.session_state['redirect_to_explore'] = False
 
     with tab_explore:
         # Sidebar controls specific to Explore
@@ -333,7 +379,7 @@ def main():
             return
 
         # Create visualization and filtered set
-        fig, filtered_df = create_visualization(df, selected_genres, feature_filters)
+        fig, filtered_df, color_map = create_visualization(df, selected_genres, feature_filters)
 
         # Sidebar content that depends on filtered_df
         with st.sidebar:
@@ -407,7 +453,7 @@ def main():
         cA, cB = st.columns([2,2])
         with cA:
             st.caption("Number of tracks by genre in the current filters")
-            display_genre_distribution(filtered_df)
+            display_genre_distribution(filtered_df, color_map=color_map)
         with cB:
             if not filtered_df.empty:
                 means = filtered_df[['danceability','energy','valence','acousticness','instrumentalness','liveness','speechiness']].mean()
@@ -531,6 +577,7 @@ def main():
                         st.dataframe(df_u.head())
                         if st.button("Use this CSV now (session)"):
                             st.session_state['session_df'] = df_u
+                            st.session_state['redirect_to_explore'] = True
                             st.toast("Dataset loaded for this session. Open the Explore tab.")
                             st.success("Using uploaded dataset for this session. Redirecting to Explore...")
                             st.experimental_rerun()
@@ -624,6 +671,7 @@ def main():
 
                     if st.button("Use this dataset in the app now"):
                         st.session_state['session_df'] = out_df
+                        st.session_state['redirect_to_explore'] = True
                         st.toast("Dataset loaded for this session. Open the Explore tab.")
                         st.success("This session will now use the generated dataset. Redirecting to Explore...")
                         st.experimental_rerun()
